@@ -264,6 +264,30 @@ def test_stream_loss_during_inference_rejects_response(rollout: RolloutFixture) 
     instance.policy_preview.publish.assert_not_called()
 
 
+def test_stream_loss_during_execution_cancels_trajectory(rollout: RolloutFixture) -> None:
+    instance, _, entered, release, subjects = rollout
+    executed = Event()
+
+    def execute(_: Any) -> TrajectoryExecutionResult:
+        executed.set()
+        return TrajectoryExecutionResult(TrajectoryExecutionStatus.ACCEPTED)
+
+    instance._control.execute_trajectory.side_effect = execute
+    instance.start_rollout(dispatch_actions=True)
+    assert entered.wait(5)
+    release.set()
+    assert executed.wait(5)
+    for subject in subjects:
+        subject.on_completed()
+    with instance._control_lock:
+        instance._observation_time = time.time() - instance.config.max_observation_age_s - 1
+    worker = instance._worker
+    assert worker is not None
+    worker.result(timeout=5)
+    instance._control.cancel_trajectory.assert_called_once()
+    assert "stale during execution" in instance.rollout_status()["last_error"]
+
+
 def test_uncertain_cancellation_requires_retry(rollout: RolloutFixture) -> None:
     instance, _, entered, release, _ = rollout
     instance.start_rollout(dispatch_actions=True)

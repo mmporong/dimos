@@ -282,6 +282,12 @@ class DreamlabsRolloutModule(DreamlabsModule):
                     dispatch = self._dispatch
                 if dispatch:
                     while self._is_active(revision):
+                        with self._control_lock:
+                            age = time.time() - self._observation_time
+                        if age > self.config.max_observation_age_s:
+                            raise ValueError(
+                                "observation stream stopped or became stale during execution"
+                            )
                         status = await asyncio.to_thread(
                             self._control.task_invoke,
                             JOINT_TRAJECTORY_TASK_NAME,
