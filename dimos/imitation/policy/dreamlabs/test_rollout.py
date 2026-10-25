@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from collections.abc import Iterator
-from threading import Event
+from threading import Event, Lock, Thread
 import time
 from types import SimpleNamespace
 from typing import Any
@@ -24,7 +24,10 @@ from pytest_mock import MockerFixture
 import reactivex as rx
 from reactivex.subject import Subject
 
+from dimos.control.task import CoordinatorState, JointStateSnapshot
 from dimos.control.tasks.trajectory_task.trajectory_task import (
+    JointTrajectoryTask,
+    JointTrajectoryTaskConfig,
     TrajectoryCancellationResult,
     TrajectoryCancellationStatus,
     TrajectoryExecutionResult,
@@ -170,7 +173,8 @@ def test_explicit_dispatch_uses_coordinator_and_cancels(
     instance, _, entered, release, _ = rollout
     executed = Event()
 
-    def execute(trajectory: Any) -> TrajectoryExecutionResult:
+    def execute(trajectory: Any, deadman_timeout: float | None) -> TrajectoryExecutionResult:
+        assert deadman_timeout == instance.config.deadman_timeout_s
         assert trajectory.joint_names == DUAL_OPENYAM_JOINTS
         assert trajectory.points[0].positions == POSITIONS
         executed.set()
@@ -268,7 +272,7 @@ def test_stream_loss_during_execution_cancels_trajectory(rollout: RolloutFixture
     instance, _, entered, release, subjects = rollout
     executed = Event()
 
-    def execute(_: Any) -> TrajectoryExecutionResult:
+    def execute(_: Any, deadman_timeout: float | None) -> TrajectoryExecutionResult:
         executed.set()
         return TrajectoryExecutionResult(TrajectoryExecutionStatus.ACCEPTED)
 
@@ -286,6 +290,56 @@ def test_stream_loss_during_execution_cancels_trajectory(rollout: RolloutFixture
     worker.result(timeout=5)
     instance._control.cancel_trajectory.assert_called_once()
     assert "stale during execution" in instance.rollout_status()["last_error"]
+
+
+def test_frozen_rollout_trips_coordinator_deadman(rollout: RolloutFixture) -> None:
+    instance, _, entered, release, _ = rollout
+    instance.config.deadman_timeout_s = 0.3
+    task = JointTrajectoryTask(JointTrajectoryTaskConfig(joint_names=DUAL_OPENYAM_JOINTS))
+    joints = JointStateSnapshot(
+        joint_positions=dict(zip(DUAL_OPENYAM_JOINTS, POSITIONS, strict=True))
+    )
+    lock, frozen, thaw, ticking = Lock(), Event(), Event(), Event()
+
+    def execute(trajectory: Any, deadman_timeout: float | None = None) -> Any:
+        with lock:
+            return task.execute(trajectory, joints.joint_positions, deadman_timeout)
+
+    def invoke(_: str, method: str, kwargs: dict[str, Any]) -> Any:
+        frozen.set()
+        assert thaw.wait(5), "frozen rollout was not thawed"
+        with lock:
+            return getattr(task, method)(time.perf_counter())
+
+    def tick() -> None:
+        last = time.perf_counter()
+        while not ticking.is_set():
+            now = time.perf_counter()
+            with lock:
+                task.compute(CoordinatorState(joints=joints, t_now=now, dt=now - last))
+            last = now
+            time.sleep(0.01)
+
+    instance._control.execute_trajectory.side_effect = execute
+    instance._control.task_invoke.side_effect = invoke
+    ticker = Thread(target=tick, daemon=True)
+    ticker.start()
+    try:
+        instance.start_rollout(dispatch_actions=True)
+        assert entered.wait(5)
+        release.set()
+        # The rollout blocks in its first keepalive poll, as if its process froze.
+        assert frozen.wait(5)
+        frozen_at = time.perf_counter()
+        while task.is_active() and time.perf_counter() - frozen_at < 3:
+            time.sleep(0.01)
+        stopped_after = time.perf_counter() - frozen_at
+        assert task.get_state() is TrajectoryState.ABORTED
+        assert stopped_after < 0.6, f"chunk ran {stopped_after:.2f}s after the rollout froze"
+    finally:
+        thaw.set()
+        ticking.set()
+        ticker.join(timeout=5)
 
 
 def test_uncertain_cancellation_requires_retry(rollout: RolloutFixture) -> None:

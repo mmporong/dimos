@@ -52,7 +52,9 @@ logger = setup_logger()
 
 
 class DreamlabsControl(Spec, Protocol):
-    def execute_trajectory(self, trajectory: JointTrajectory) -> TrajectoryExecutionResult: ...
+    def execute_trajectory(
+        self, trajectory: JointTrajectory, deadman_timeout: float | None = None
+    ) -> TrajectoryExecutionResult: ...
     def cancel_trajectory(self) -> TrajectoryCancellationResult: ...
     def task_invoke(self, task_name: str, method: str, kwargs: dict[str, Any]) -> Any: ...
 
@@ -60,6 +62,8 @@ class DreamlabsControl(Spec, Protocol):
 class DreamlabsRolloutConfig(DreamlabsConfig):
     max_observation_age_s: float = Field(default=0.5, gt=0)
     max_observation_skew_s: float = Field(default=0.1, gt=0)
+    # The coordinator aborts a dispatched chunk if this rollout stops polling it.
+    deadman_timeout_s: float = Field(default=1.0, gt=0)
 
 
 class RolloutStatus(TypedDict):
@@ -252,7 +256,9 @@ class DreamlabsRolloutModule(DreamlabsModule):
                             raise ValueError(
                                 f"{name} targets exceed model limits [{lower}, {upper}]"
                             )
-                result = self._control.execute_trajectory(trajectory)
+                result = self._control.execute_trajectory(
+                    trajectory, deadman_timeout=self.config.deadman_timeout_s
+                )
                 if result.status is not TrajectoryExecutionStatus.ACCEPTED:
                     raise RuntimeError(
                         f"trajectory rejected: {result.status.name}: {result.message}"
@@ -291,7 +297,7 @@ class DreamlabsRolloutModule(DreamlabsModule):
                         status = await asyncio.to_thread(
                             self._control.task_invoke,
                             JOINT_TRAJECTORY_TASK_NAME,
-                            "get_status",
+                            "keepalive",
                             {"t_now": None},
                         )
                         if not isinstance(status, TrajectoryStatus):

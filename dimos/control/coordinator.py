@@ -482,8 +482,14 @@ class ControlCoordinator(Module):
             return positions
 
     @rpc
-    def execute_trajectory(self, trajectory: JointTrajectory) -> TrajectoryExecutionResult:
-        """Execute a trajectory through the coordinator's sole trajectory task."""
+    def execute_trajectory(
+        self, trajectory: JointTrajectory, deadman_timeout: float | None = None
+    ) -> TrajectoryExecutionResult:
+        """Execute a trajectory through the coordinator's sole trajectory task.
+
+        With ``deadman_timeout``, the caller must invoke the task's ``keepalive``
+        at least that often (seconds) or the trajectory aborts.
+        """
         current_positions = self.get_joint_positions()
         with self._task_lock:
             if self._trajectory_task is None:
@@ -491,7 +497,7 @@ class ControlCoordinator(Module):
                     TrajectoryExecutionStatus.NO_TRAJECTORY_TASK,
                     "Control coordinator has no trajectory task",
                 )
-            return self._trajectory_task.execute(trajectory, current_positions)
+            return self._trajectory_task.execute(trajectory, current_positions, deadman_timeout)
 
     @rpc
     def cancel_trajectory(self) -> TrajectoryCancellationResult:

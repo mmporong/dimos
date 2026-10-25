@@ -202,6 +202,8 @@ class JointTrajectoryTask(BaseControlTask):
         self._commanded_positions: dict[str, float] = {}
         self._start_time: float = 0.0
         self._pending_start: bool = False  # Defer start time to first compute()
+        self._deadman_timeout: float | None = None
+        self._last_keepalive: float | None = None
         self._last_duration: float = 0.0
         self._last_elapsed: float = 0.0
 
@@ -263,6 +265,19 @@ class JointTrajectoryTask(BaseControlTask):
         """
         if not self._motions:
             return None
+
+        if self._deadman_timeout is not None:
+            if self._last_keepalive is None:
+                self._last_keepalive = state.t_now
+            elif state.t_now - self._last_keepalive > self._deadman_timeout:
+                logger.warning(
+                    "Trajectory deadman expired",
+                    task_name=self._name,
+                    timeout=self._deadman_timeout,
+                )
+                self._state = TrajectoryState.ABORTED
+                self._clear_active_trajectory()
+                return None
 
         output_names = [name for name in self._joint_names_list if name in self._motions]
         all_complete = bool(self._motions)
@@ -337,6 +352,8 @@ class JointTrajectoryTask(BaseControlTask):
         self._commanded_positions.clear()
         self._pending_start = False
         self._start_time = 0.0
+        self._deadman_timeout = None
+        self._last_keepalive = None
 
     def _validate_trajectory(self, trajectory: JointTrajectory) -> bool:
         """Validate a trajectory before execution."""
@@ -389,16 +406,27 @@ class JointTrajectoryTask(BaseControlTask):
         self,
         trajectory: JointTrajectory,
         current_positions: Mapping[str, float],
+        deadman_timeout: float | None = None,
     ) -> TrajectoryExecutionResult:
         """Start executing a trajectory.
 
         Args:
             trajectory: Trajectory to execute
             current_positions: Authoritative positions from the coordinator.
+            deadman_timeout: Abort if ``keepalive`` is not called for this many
+                seconds of coordinator time. None runs to completion.
 
         Returns:
             Semantic execution acceptance result.
         """
+        if deadman_timeout is not None and not (
+            math.isfinite(deadman_timeout) and deadman_timeout > 0.0
+        ):
+            return TrajectoryExecutionResult(
+                TrajectoryExecutionStatus.INVALID_TRAJECTORY,
+                f"deadman_timeout must be finite and positive, got {deadman_timeout}",
+            )
+
         if self._state == TrajectoryState.FAULT:
             logger.warning(f"Cannot execute: {self._name} in FAULT state")
             return TrajectoryExecutionResult(
@@ -467,6 +495,8 @@ class JointTrajectoryTask(BaseControlTask):
         self._last_duration = trajectory.duration
         self._last_elapsed = 0.0
         self._pending_start = True  # Start time set on first compute()
+        self._deadman_timeout = deadman_timeout
+        self._last_keepalive = None
         self._state = TrajectoryState.EXECUTING
 
         logger.info(
@@ -487,6 +517,12 @@ class JointTrajectoryTask(BaseControlTask):
         self._clear_active_trajectory()
         logger.info(f"Trajectory {self._name} cancelled")
         return TrajectoryCancellationResult(TrajectoryCancellationStatus.CANCELLED)
+
+    def keepalive(self, t_now: float) -> TrajectoryStatus:
+        """Refresh the deadman of the executing trajectory and return its status."""
+        if self._state == TrajectoryState.EXECUTING and self._deadman_timeout is not None:
+            self._last_keepalive = t_now
+        return self.get_status(t_now)
 
     def reset(self) -> bool:
         """Reset to idle state.

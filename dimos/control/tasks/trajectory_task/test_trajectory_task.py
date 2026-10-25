@@ -25,6 +25,7 @@ from dimos.control.tasks.trajectory_task.trajectory_task import (
 )
 from dimos.msgs.trajectory_msgs.JointTrajectory import JointTrajectory
 from dimos.msgs.trajectory_msgs.TrajectoryPoint import TrajectoryPoint
+from dimos.msgs.trajectory_msgs.TrajectoryStatus import TrajectoryState
 
 
 @pytest.mark.parametrize("single_point", [False, True])
@@ -131,3 +132,48 @@ def test_completed_trajectory_does_not_bypass_start_validation(positions, expect
         ],
     )
     assert task.execute(trajectory, positions).status is expected
+
+
+def _ramp() -> JointTrajectory:
+    return JointTrajectory(
+        joint_names=["joint"],
+        points=[
+            TrajectoryPoint(positions=[0.0]),
+            TrajectoryPoint(positions=[1.0], time_from_start=2.0),
+        ],
+    )
+
+
+@pytest.mark.parametrize("keepalive", [False, True])
+def test_deadman_aborts_trajectory_when_keepalive_stops(keepalive):
+    task = JointTrajectoryTask(JointTrajectoryTaskConfig(joint_names=["joint"]))
+    joints = JointStateSnapshot(joint_positions={"joint": 0.0})
+    result = task.execute(_ramp(), joints.joint_positions, deadman_timeout=0.5)
+    assert result.status is TrajectoryExecutionStatus.ACCEPTED
+    t_now = 0.0
+    for tick in range(1, 101):
+        t_now = tick * 0.01
+        if keepalive:
+            task.keepalive(t_now)
+        if task.compute(CoordinatorState(joints=joints, t_now=t_now, dt=0.01)) is None:
+            break
+    if keepalive:
+        assert task.get_state() is TrajectoryState.EXECUTING
+        return
+    assert task.get_state() is TrajectoryState.ABORTED
+    assert 0.5 < t_now <= 0.53
+    # The next execution without a deadman runs unsupervised again.
+    assert (
+        task.execute(_ramp(), joints.joint_positions).status is TrajectoryExecutionStatus.ACCEPTED
+    )
+    for tick in range(1, 101):
+        task.compute(CoordinatorState(joints=joints, t_now=1.0 + tick * 0.01, dt=0.01))
+    assert task.get_state() is TrajectoryState.EXECUTING
+
+
+@pytest.mark.parametrize("timeout", [0.0, -1.0, float("nan"), float("inf")])
+def test_invalid_deadman_timeout_is_rejected(timeout):
+    task = JointTrajectoryTask(JointTrajectoryTaskConfig(joint_names=["joint"]))
+    result = task.execute(_ramp(), {"joint": 0.0}, deadman_timeout=timeout)
+    assert result.status is TrajectoryExecutionStatus.INVALID_TRAJECTORY
+    assert not task.is_active()
