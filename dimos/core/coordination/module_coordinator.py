@@ -28,7 +28,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 from dimos.core.coordination.blueprint_config.values import deep_merge, plain
-from dimos.core.coordination.blueprints import TransportSpec, transport_config_name
+from dimos.core.coordination.blueprints import transport_config_name
 from dimos.core.coordination.coordinator_rpc import CoordinatorRPC
 from dimos.core.coordination.worker_manager import WorkerManager
 from dimos.core.coordination.worker_manager_python import WorkerManagerPython
@@ -36,7 +36,7 @@ from dimos.core.global_config import GlobalConfig, global_config
 from dimos.core.introspection.module.info import StreamDescriptor
 from dimos.core.module import ModuleBase, ModuleSpec, is_module_type
 from dimos.core.resource import Resource
-from dimos.core.stream import Transport
+from dimos.core.stream import Transport, TransportSpec
 from dimos.core.transport import (
     LCMTransport,
     PubSubTransport,

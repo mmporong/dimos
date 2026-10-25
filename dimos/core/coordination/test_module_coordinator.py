@@ -131,6 +131,9 @@ class NestedConfiguredTransport(PubSubTransport[bytes]):
         super().__init__(topic)
         self._config = config or self._config_cls(**config_kwargs)
 
+    def cbor_encode(self) -> dict[str, Any]:
+        return {"topic": self.topic, "config": self._config}
+
     def start(self) -> None:
         pass
 
