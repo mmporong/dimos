@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import asyncio
 from collections.abc import Iterator
 from threading import Event, Lock, Thread
 import time
@@ -121,6 +122,13 @@ def rollout(mocker: MockerFixture) -> Iterator[RolloutFixture]:
         instance.stop()
         for subject in subjects:
             subject.dispose()
+
+
+def stop_observations(instance: DreamlabsRolloutModule) -> None:
+    # Cancel the observation dispatcher, then let a handler already in flight finish.
+    assert instance._observation_subscription is not None
+    instance._observation_subscription.dispose()
+    instance.spawn(asyncio.sleep(0.05)).result(timeout=5)
 
 
 def test_startup_idle_and_preview_never_dispatches(
@@ -253,12 +261,10 @@ def test_manual_blueprint_and_deployment_arguments() -> None:
 
 
 def test_stream_loss_during_inference_rejects_response(rollout: RolloutFixture) -> None:
-    instance, _, entered, release, subjects = rollout
+    instance, _, entered, release, _ = rollout
     instance.start_rollout(dispatch_actions=True)
     assert entered.wait(5)
-    for subject in subjects:
-        subject.on_completed()
-    # No additional ticks can arrive. Use the captured wall-clock age, without a sleep.
+    stop_observations(instance)
     with instance._control_lock:
         instance._observation_time = time.time() - instance.config.max_observation_age_s - 1
     worker = instance._worker
@@ -271,7 +277,7 @@ def test_stream_loss_during_inference_rejects_response(rollout: RolloutFixture) 
 
 
 def test_stream_loss_during_execution_cancels_trajectory(rollout: RolloutFixture) -> None:
-    instance, _, entered, release, subjects = rollout
+    instance, _, entered, release, _ = rollout
     executed = Event()
 
     def execute(_: Any, deadman_timeout: float | None) -> TrajectoryExecutionResult:
@@ -283,8 +289,7 @@ def test_stream_loss_during_execution_cancels_trajectory(rollout: RolloutFixture
     assert entered.wait(5)
     release.set()
     assert executed.wait(5)
-    for subject in subjects:
-        subject.on_completed()
+    stop_observations(instance)
     with instance._control_lock:
         instance._observation_time = time.time() - instance.config.max_observation_age_s - 1
     worker = instance._worker
