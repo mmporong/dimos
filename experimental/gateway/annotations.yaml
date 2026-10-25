@@ -646,6 +646,16 @@ robots:
         teleop-webxr-dual-openyam:
           title: Dual OpenYAM VR teleop
           description: Coupled VR teleoperation of both OpenYAM arms.
+        dreamlabs-dual-openyam:
+          title: Dual OpenYAM Dreamlabs policy
+          description: Dreamlabs policy inference for both OpenYAM arms, without cameras or control.
+        dreamlabs-dual-openyam-manual:
+          title: Dual OpenYAM Dreamlabs rollout
+          description: Preview Dreamlabs actions from three cameras, and run them on both arms on request.
+          recommended_config:
+          - {module: overheadcamera, field: device, label: Overhead camera, required: true}
+          - {module: leftwristcamera, field: device, label: Left wrist camera, required: true}
+          - {module: rightwristcamera, field: device, label: Right wrist camera, required: true}
     openarm:
       name: OpenArm
       description: The bimanual OpenArm, over CAN.
