@@ -18,6 +18,8 @@ import pytest
 
 from dimos.imitation.policy.dreamlabs.kinematics import DreamlabsKinematics
 
+pytestmark = pytest.mark.self_hosted
+
 
 # Canonical dual_openyam_abc_box_v2 references with the explicit SDK TCP transform.
 # These are offline pose fixtures, not physical calibration or a duplicate model.

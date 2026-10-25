@@ -49,6 +49,8 @@ from dimos.robot.manipulators.dual_openyam.blueprints.dreamlabs import (
 from dimos.robot.manipulators.dual_openyam.config import dual_openyam_model_config
 from dimos.robot.manipulators.dual_openyam.joints import DUAL_OPENYAM_JOINTS
 
+pytestmark = pytest.mark.self_hosted
+
 RolloutFixture = tuple[DreamlabsRolloutModule, Any, Event, Event, list[Subject[Any]]]
 
 POSITIONS = [0.0, 0.2, 0.0, 0.0, 0.0, 0.0] * 2 + [0.5, 0.5]

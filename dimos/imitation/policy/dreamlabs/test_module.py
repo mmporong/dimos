@@ -31,6 +31,8 @@ from dimos.msgs.sensor_msgs.JointState import JointState
 from dimos.protocol.rpc.pubsubrpc import LCMRPC
 from dimos.robot.manipulators.dual_openyam.joints import DUAL_OPENYAM_JOINTS
 
+pytestmark = pytest.mark.self_hosted
+
 LEFT = [0.0] * 6
 RIGHT = [0.0, 0.5, 0.5, -0.35, 0.0, 0.0]
 LEFT_ACTION = [0.01, 0.51, 0.52, -0.34, 0.02, 0.03]
