@@ -17,7 +17,6 @@
 
 from typing import Any
 
-import cv2
 import numpy as np
 from numpy.typing import NDArray
 
@@ -60,6 +59,8 @@ def observation(vector: NDArray[np.float64], prompt: str) -> dict[str, Any]:
 
 
 def encode_image(image: Image) -> str:
+    import cv2
+
     if image.format != ImageFormat.RGB or image.data.dtype != np.uint8:
         raise ValueError("Dreamlabs requires uint8 RGB images")
     if image.data.ndim != 3 or image.data.shape[2] != 3 or not image.data.size:
