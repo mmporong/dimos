@@ -8,9 +8,10 @@
     "node": ">=24 <25 || >=26 <27"
   },
   "scripts": {
+    "build": "node build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node test/run.mjs",
-    "check": "npm run typecheck && npm test",
+    "check": "npm run typecheck && npm test && npm run build",
     "format": "prettier --write ."
   },
   "dependencies": {
@@ -33,6 +34,9 @@
     "typescript": "5.9.3"
   },
   "allowScripts": {
-    "@fails-components/webtransport-transport-http3-quiche": true
+    "@fails-components/webtransport-transport-http3-quiche": true,
+    "esbuild": false,
+    "protobufjs": false,
+    "@google/genai": false
   }
 }
