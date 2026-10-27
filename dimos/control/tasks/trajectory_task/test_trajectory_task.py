@@ -23,6 +23,7 @@ from dimos.control.tasks.trajectory_task.trajectory_task import (
     JointTrajectoryTaskConfig,
     TrajectoryExecutionStatus,
 )
+from dimos.msgs.sensor_msgs.JointState import JointState
 from dimos.msgs.trajectory_msgs.JointTrajectory import JointTrajectory
 from dimos.msgs.trajectory_msgs.TrajectoryPoint import TrajectoryPoint
 from dimos.msgs.trajectory_msgs.TrajectoryStatus import TrajectoryState
@@ -169,6 +170,28 @@ def test_deadman_aborts_trajectory_when_keepalive_stops(keepalive):
     for tick in range(1, 101):
         task.compute(CoordinatorState(joints=joints, t_now=1.0 + tick * 0.01, dt=0.01))
     assert task.get_state() is TrajectoryState.EXECUTING
+
+
+def test_estop_aborts_trajectory_and_latches_until_cleared():
+    task = JointTrajectoryTask(JointTrajectoryTaskConfig(joint_names=["joint"]))
+    joints = JointStateSnapshot(joint_positions={"joint": 0.0})
+    assert (
+        task.execute(_ramp(), joints.joint_positions).status is TrajectoryExecutionStatus.ACCEPTED
+    )
+    assert task.compute(CoordinatorState(joints=joints, t_now=0.01, dt=0.01)) is not None
+
+    task.set_estop(True)
+    assert task.get_state() is TrajectoryState.ABORTED
+    assert task.compute(CoordinatorState(joints=joints, t_now=0.02, dt=0.01)) is None
+    result = task.execute(_ramp(), joints.joint_positions)
+    assert result.status is TrajectoryExecutionStatus.ESTOPPED
+    assert not task.on_joint_command(JointState(name=["joint"], position=[0.5]), 0.03)
+    assert not task.is_active()
+
+    task.set_estop(False)
+    assert (
+        task.execute(_ramp(), joints.joint_positions).status is TrajectoryExecutionStatus.ACCEPTED
+    )
 
 
 @pytest.mark.parametrize("timeout", [0.0, -1.0, float("nan"), float("inf")])

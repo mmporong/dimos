@@ -84,6 +84,7 @@ class TrajectoryExecutionStatus(Enum):
     START_STATE_UNAVAILABLE = auto()
     START_STATE_MISMATCH = auto()
     ALREADY_EXECUTING = auto()
+    ESTOPPED = auto()
 
 
 @dataclass(frozen=True)
@@ -206,6 +207,7 @@ class JointTrajectoryTask(BaseControlTask):
         self._last_keepalive: float | None = None
         self._last_duration: float = 0.0
         self._last_elapsed: float = 0.0
+        self._estopped = False
 
         configured_limits = config.velocity_limits
         if configured_limits is None:
@@ -427,6 +429,12 @@ class JointTrajectoryTask(BaseControlTask):
                 f"deadman_timeout must be finite and positive, got {deadman_timeout}",
             )
 
+        if self._estopped:
+            return TrajectoryExecutionResult(
+                TrajectoryExecutionStatus.ESTOPPED,
+                f"Trajectory task '{self._name}' is E-stopped",
+            )
+
         if self._state == TrajectoryState.FAULT:
             logger.warning(f"Cannot execute: {self._name} in FAULT state")
             return TrajectoryExecutionResult(
@@ -517,6 +525,14 @@ class JointTrajectoryTask(BaseControlTask):
         self._clear_active_trajectory()
         logger.info(f"Trajectory {self._name} cancelled")
         return TrajectoryCancellationResult(TrajectoryCancellationStatus.CANCELLED)
+
+    def set_estop(self, estopped: bool) -> None:
+        """Latch E-STOP: abort the active trajectory and reject new ones until cleared."""
+        self._estopped = estopped
+        if estopped and self._state == TrajectoryState.EXECUTING:
+            self._state = TrajectoryState.ABORTED
+            self._clear_active_trajectory()
+            logger.warning(f"Trajectory {self._name} aborted by E-STOP")
 
     def keepalive(self, t_now: float) -> TrajectoryStatus:
         """Refresh the deadman of the executing trajectory and return its status."""
